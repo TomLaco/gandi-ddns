@@ -12,7 +12,8 @@ Example config.ini:
 
     [foobar.org]
 
-    # blank value will be filled in with running host's IP.
+    # blank value will be filled in with running host's IP
+    # or result of ipify.org API query for A and AAAA record types.
     A, @
     A, mail
     CNAME, bmon = some-host.lan.
@@ -28,7 +29,6 @@ Example config.ini:
 
 import argparse
 import subprocess
-import io
 import re
 import os
 import csv
@@ -45,7 +45,6 @@ from dataclasses import dataclass, field
 
 # Optionally specify API key via envvar (vs. config file).
 ENV_APIKEY = os.environ.get("GANDI_APIKEY")
-HTTP_IP_SOURCE = "https://ifconfig.me"
 
 # Default locations for the configuration file.
 CONFIG_SEARCH_PATH = [
@@ -55,7 +54,7 @@ CONFIG_SEARCH_PATH = [
         [
             os.environ.get("GANDI_DDNS_CONFIG"),
             Path.home() / ".config" / "gandi-ddns.ini",
-            "/etc/gandi-ddns/config.ini",
+            "/usr/local/etc/gandi-ddns/config.ini",
         ],
     )
 ]
@@ -98,7 +97,7 @@ def split_csv_line(line: str) -> t.List[str]:
 
 
 def get_config(
-    file_handle: io.TextIOWrapper | None = None, location: Path | None = None
+    file_handle: "io.TextIOWrapper | None" = None, location: "Path | None" = None
 ) -> Config:
     if not (file_handle or location):
         raise ValueError("must specify config location")
@@ -168,16 +167,17 @@ def send_notification(msg: str):
 def get_local_ip() -> str:
     assert GLOBAL_CONF.wan_device
     got = subprocess.check_output(
-        f"ip addr show dev {GLOBAL_CONF.wan_device}", shell=True
+        f"ifconfig {GLOBAL_CONF.wan_device}", shell=True
     ).decode()
-    local_ip = re.search(r"inet ((\d{1,3}\.){3}[^/]+)", got).groups()[0]
-    net_ip = request.urlopen(HTTP_IP_SOURCE).read().decode()
+    return re.search(r"inet ((\d{1,3}\.){3}\d{1,3}) .*", got).groups()[0]
 
-    if local_ip != net_ip:
-        print(mismatch := f"IP mismatch: {local_ip} vs. {net_ip}")
-        send_notification(mismatch)
 
-    return local_ip
+def get_net_ip(protocol: int):
+    url = {
+        4: 'https://api.ipify.org',
+        6: 'https://api64.ipify.org'
+    }
+    return request.urlopen(url.get(protocol)).read().decode()
 
 
 def get_domain_data(domain: str):
@@ -195,6 +195,7 @@ def main():
         "-c",
         "--conf",
         action="store_const",
+        const=str,
         help="Location of ini config file to use",
     )
     args = parser.parse_args()
@@ -216,9 +217,6 @@ def main():
     if not GLOBAL_CONF.wan_device:
         die("config default.wan_device must be specified")
 
-    local_ip = get_local_ip()
-    print(f"Local IP: {local_ip}")
-
     for domain, records in GLOBAL_CONF.records.items():
         domain_data = get_domain_data(domain)
         assert domain_data
@@ -226,10 +224,15 @@ def main():
 
         for record in records:
             if not record.val:
-                record.val = [local_ip]
+                if record.type == 'A':
+                    record.val = [get_net_ip(4)]
+                elif record.type == 'AAAA':
+                    record.val = [get_net_ip(6)]
+                else:
+                    record.val = [get_local_ip()]
 
             if record.type == "PTR":
-                record.name = f"{local_ip}.in-addr.arpa."
+                record.name = f"{record.val}.in-addr.arpa."
                 record.val = [f"{domain}."]
 
             print(record)

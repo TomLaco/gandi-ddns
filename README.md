@@ -2,8 +2,9 @@
 # gandi-ddns
 
 A dependency-less script for declarative dynamic DNS using the gandi.net API.
+This is a fork designed to be used in FreeBSD 12+ jails.
 
-**Requires**: Python 3.10+
+**Requires**: Python 3.9+
 
 
 ## Example configuration
@@ -13,7 +14,7 @@ specify the `--conf` argument):
 
 - environment variable `GANDI_DDNS_CONFIG`
 - ~/.config/gandi-ddns.ini
-- /etc/gandi-ddns/config.ini
+- /usr/local/etc/gandi-ddns/config.ini
 
 ```ini
 
@@ -35,7 +36,8 @@ notify_script = /usr/local/bin/pushover
 
 [foobar.org]
 
-# blank value will be filled in with running host's IP.
+# blank value will be filled in with running host's IP 
+# or result of ipify.org API query for A and AAAA record types.
 A, @
 A, mail
 CNAME, bmon = some-host.lan.
